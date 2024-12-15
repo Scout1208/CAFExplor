@@ -1,0 +1,137 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>UMAP and Heatmap</title>
+    <script src="https://d3js.org/d3.v7.min.js"></script>
+    <style>
+        .umap { 
+            border: 1px solid #ccc; 
+            display: inline-block; /* 確保 UMAP 和 Heatmap 在同一行或按需排列 */
+        }
+        .heatmap { 
+            margin-top: 20px; 
+        }
+        .tooltip {
+            position: absolute;
+            background: rgba(0, 0, 0, 0.7);
+            color: #fff;
+            padding: 5px;
+            border-radius: 4px;
+            pointer-events: none;
+            font-size: 12px;
+        }
+    </style>
+</head>
+<body>
+    <div id="umap" class="umap"></div>
+    <div id="heatmap" class="heatmap"></div>
+    <div class="tooltip" style="display: none;"></div>
+
+    <script>
+        // 定義 Cell Type 名稱
+        const cellTypes = {
+            "0": "CD4 T",
+            "1": "CD14 Monocytes",
+            "2": "CD8 T & NK",
+            "3": "B cells",
+            "4": "FCGR3A+ Monocytes",
+            "5": "Dendritic",
+            "6": "Megakaryocytes",
+            "7": "NK or Unknown"
+        };
+
+        const tooltip = d3.select(".tooltip");
+
+        // 同時加載 UMAP 和 Heatmap 數據
+        Promise.all([
+            d3.json('umap_data.json'),
+            d3.json('heatmap_data.json')
+        ]).then(([umapData, heatmapData]) => {
+            const width = 800, height = 600;
+
+            const svg = d3.select('#umap')
+                .append('svg')
+                .attr('width', width)
+                .attr('height', height);
+
+            const x = d3.scaleLinear()
+                .domain(d3.extent(umapData, d => d.UMAP1))
+                .range([50, width - 150]);
+
+            const y = d3.scaleLinear()
+                .domain(d3.extent(umapData, d => d.UMAP2))
+                .range([height - 50, 50]);
+
+            // 創建顏色比例尺
+            const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
+
+            // 添加點
+            svg.selectAll('circle')
+                .data(umapData)
+                .enter()
+                .append('circle')
+                .attr('cx', d => x(d.UMAP1))
+                .attr('cy', d => y(d.UMAP2))
+                .attr('r', 8)
+                .attr('fill', d => colorScale(d.leiden))
+                .attr('stroke', 'black')
+                .attr('stroke-width', 0.5)
+                .style('cursor', 'pointer')
+                .on('mouseover', function (event, d) {
+                    // 提取 Cell Type Name
+                    const cellTypeName = cellTypes[d.leiden] || `Unknown Type (${d.leiden})`;
+                    // 查找對應的基因數據
+                    const cellData = heatmapData.find(h => h.leiden === d.leiden);
+
+                    let tooltipContent = `Cell Type: ${cellTypeName}`;
+                    
+                    if (cellData) {
+                        const genes = Object.entries(cellData)
+                            .filter(([key]) => key !== 'leiden' && key !== 'UMAP1' && key !== 'UMAP2')
+                            .map(([key, val]) => `${key}: ${val.toFixed(2)}`)
+                            .join('<br>');
+                        tooltipContent += `<br>Genes:<br>${genes}`;
+                    } else {
+                        tooltipContent += `<br><br>No gene data available`;
+                    }
+
+                    // 顯示 Tooltip
+                    tooltip.style("display", "block")
+                        .html(tooltipContent);
+                })
+                .on('mousemove', function (event) {
+                    tooltip.style("top", (event.pageY + 10) + "px")
+                        .style("left", (event.pageX + 10) + "px");
+                })
+                .on('mouseout', function () {
+                    tooltip.style("display", "none");
+                })
+                .on('click', function (event, d) {
+                    showHeatmap(d, heatmapData);  // 傳入單個細胞的數據和 heatmapData
+                });
+
+            // 添加圖例（可選）
+            const legend = svg.append("g")
+                .attr("transform", `translate(${width - 120}, 50)`);
+
+            Object.entries(cellTypes).forEach(([key, name], index) => {
+                const g = legend.append("g").attr("transform", `translate(0, ${index * 20})`);
+                g.append("rect")
+                    .attr("width", 15)
+                    .attr("height", 15)
+                    .attr("fill", colorScale(key));
+                g.append("text")
+                    .attr("x", 20)
+                    .attr("y", 12)
+                    .text(name)
+                    .style("font-size", "12px");
+            });
+            
+        }).catch(error => {
+            console.error('Error loading data:', error);
+        });
+    </script>
+</body>
+</html>
