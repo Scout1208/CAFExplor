@@ -8,10 +8,14 @@
     <style>
         .umap { 
             border: 1px solid #ccc; 
-            display: inline-block; /* 確保 UMAP 和 Heatmap 在同一行或按需排列 */
+            display: inline-block; 
+            vertical-align: top;
         }
         .heatmap { 
-            margin-top: 20px; 
+            margin-left: 50px; 
+            border: 1px solid #ccc; 
+            display: inline-block; 
+            vertical-align: top;
         }
         .tooltip {
             position: absolute;
@@ -21,6 +25,15 @@
             border-radius: 4px;
             pointer-events: none;
             font-size: 12px;
+        }
+        .axis text {
+            font-size: 10px;
+        }
+        .axis path,
+        .axis line {
+            fill: none;
+            stroke: #000;
+            shape-rendering: crispEdges;
         }
     </style>
 </head>
@@ -42,93 +55,203 @@
             "7": "NK or Unknown"
         };
 
-        const tooltip = d3.select(".tooltip");
-
-        // 同時加載 UMAP 和 Heatmap 數據
+        // 加載 UMAP 和 Heatmap 數據
         Promise.all([
             d3.json('umap_data.json'),
             d3.json('heatmap_data.json')
         ]).then(([umapData, heatmapData]) => {
-            const width = 800, height = 600;
+            // 設定 UMAP 圖表的尺寸
+            const umapWidth = 800, umapHeight = 600;
 
-            const svg = d3.select('#umap')
+            const umapSvg = d3.select('#umap')
                 .append('svg')
-                .attr('width', width)
-                .attr('height', height);
+                .attr('width', umapWidth)
+                .attr('height', umapHeight);
 
+            // 設定比例尺
             const x = d3.scaleLinear()
                 .domain(d3.extent(umapData, d => d.UMAP1))
-                .range([50, width - 150]);
+                .range([50, umapWidth - 150]);
 
             const y = d3.scaleLinear()
                 .domain(d3.extent(umapData, d => d.UMAP2))
-                .range([height - 50, 50]);
+                .range([umapHeight - 50, 50]);
 
             // 創建顏色比例尺
             const colorScale = d3.scaleOrdinal(d3.schemeCategory10);
 
             // 添加點
-            svg.selectAll('circle')
+            umapSvg.selectAll('circle')
                 .data(umapData)
                 .enter()
                 .append('circle')
                 .attr('cx', d => x(d.UMAP1))
                 .attr('cy', d => y(d.UMAP2))
-                .attr('r', 8)
+                .attr('r', 5)
                 .attr('fill', d => colorScale(d.leiden))
                 .attr('stroke', 'black')
                 .attr('stroke-width', 0.5)
                 .style('cursor', 'pointer')
-                .on('mouseover', function (event, d) {
-                    // 提取 Cell Type Name
+                .on('mouseover', function(event, d) {
                     const cellTypeName = cellTypes[d.leiden] || `Unknown Type (${d.leiden})`;
-                    // 查找對應的基因數據
-                    const cellData = heatmapData.find(h => h.leiden === d.leiden);
-
-                    let tooltipContent = `Cell Type: ${cellTypeName}`;
-                    
-                    if (cellData) {
-                        const genes = Object.entries(cellData)
-                            .filter(([key]) => key !== 'leiden' && key !== 'UMAP1' && key !== 'UMAP2')
-                            .map(([key, val]) => `${key}: ${val.toFixed(2)}`)
-                            .join('<br>');
-                        tooltipContent += `<br>Genes:<br>${genes}`;
-                    } else {
-                        tooltipContent += `<br><br>No gene data available`;
-                    }
-
                     // 顯示 Tooltip
-                    tooltip.style("display", "block")
-                        .html(tooltipContent);
+                    d3.select('.tooltip')
+                        .style("display", "block")
+                        .html(`Cell Type: ${cellTypeName}`);
                 })
-                .on('mousemove', function (event) {
-                    tooltip.style("top", (event.pageY + 10) + "px")
+                .on('mousemove', function(event) {
+                    d3.select('.tooltip')
+                        .style("top", (event.pageY + 10) + "px")
                         .style("left", (event.pageX + 10) + "px");
                 })
-                .on('mouseout', function () {
-                    tooltip.style("display", "none");
-                })
-                .on('click', function (event, d) {
-                    showHeatmap(d, heatmapData);  // 傳入單個細胞的數據和 heatmapData
+                .on('mouseout', function() {
+                    d3.select('.tooltip')
+                        .style("display", "none");
                 });
 
-            // 添加圖例（可選）
-            const legend = svg.append("g")
-                .attr("transform", `translate(${width - 120}, 50)`);
+            // 添加 UMAP 的軸（可選）
+            /*
+            umapSvg.append("g")
+                .attr("transform", `translate(0, ${umapHeight - 50})`)
+                .call(d3.axisBottom(x));
 
-            Object.entries(cellTypes).forEach(([key, name], index) => {
-                const g = legend.append("g").attr("transform", `translate(0, ${index * 20})`);
-                g.append("rect")
-                    .attr("width", 15)
-                    .attr("height", 15)
-                    .attr("fill", colorScale(key));
-                g.append("text")
-                    .attr("x", 20)
-                    .attr("y", 12)
-                    .text(name)
-                    .style("font-size", "12px");
+            umapSvg.append("g")
+                .attr("transform", `translate(50, 0)`)
+                .call(d3.axisLeft(y));
+            */
+
+            // 準備 Heatmap 數據
+            // 轉換數據格式為基因 × 細胞類型
+            const genes = Array.from(new Set(heatmapData.map(d => d.gene)));
+            const cellTypeNames = Array.from(new Set(heatmapData.map(d => d.cell_type)));
+
+            // 創建一個基因列表，保證順序一致
+            const geneList = genes;
+
+            // 創建一個細胞類型列表，保證順序一致
+            const cellTypeList = cellTypeNames;
+
+            // 創建一個二維數組表示基因 × 細胞類型的表達值
+            const matrix = [];
+            geneList.forEach(gene => {
+                const row = [];
+                cellTypeList.forEach(cell_type => {
+                    const record = heatmapData.find(d => d.gene === gene && d.cell_type === cell_type);
+                    row.push(record ? record.expression : 0);
+                });
+                matrix.push(row);
             });
-            
+
+            // 設定 Heatmap 圖表的尺寸
+            const heatmapWidth = 600, heatmapHeight = 600;
+            const heatmapSvgElement = d3.select('#heatmap')
+                .append('svg')
+                .attr('width', heatmapWidth)
+                .attr('height', heatmapHeight);
+
+            // 設定 Heatmap 的比例尺
+            const xHeat = d3.scaleBand()
+                .range([100, heatmapWidth - 100])
+                .domain(cellTypeList)
+                .padding(0.01);
+
+            const yHeat = d3.scaleBand()
+                .range([50, heatmapHeight - 50])
+                .domain(geneList)
+                .padding(0.01);
+
+            // 設定顏色比例尺
+            const expressionExtent = d3.extent(heatmapData, d => d.expression);
+            const colorHeat = d3.scaleSequential()
+                .interpolator(d3.interpolateBlues)
+                .domain([expressionExtent[0], expressionExtent[1]]);
+
+            // 添加矩形
+            heatmapSvgElement.selectAll()
+                .data(heatmapData, d => d.gene + ':' + d.cell_type)
+                .enter()
+                .append("rect")
+                .attr("x", d => xHeat(d.cell_type))
+                .attr("y", d => yHeat(d.gene))
+                .attr("width", xHeat.bandwidth())
+                .attr("height", yHeat.bandwidth())
+                .style("fill", d => colorHeat(d.expression))
+                .style("stroke", "white");
+
+            // 添加細胞類型的 X 軸
+            heatmapSvgElement.append("g")
+                .attr("transform", `translate(0, ${heatmapHeight - 50})`)
+                .call(d3.axisBottom(xHeat))
+                .selectAll("text")
+                .attr("transform", "rotate(-90)")
+                .attr("dx", "-0.8em")
+                .attr("dy", "0.15em")
+                .style("text-anchor", "end")
+                .style("font-size", "8px");
+
+            // 添加基因的 Y 軸
+            heatmapSvgElement.append("g")
+                .attr("transform", `translate(100, 0)`)
+                .call(d3.axisLeft(yHeat))
+                .selectAll("text")
+                .style("font-size", "8px");
+
+            // 添加 Heatmap 標題
+            heatmapSvgElement.append("text")
+                .attr("x", heatmapWidth / 2)
+                .attr("y", 20)
+                .attr("text-anchor", "middle")
+                .style("font-size", "16px")
+                .text("Heatmap: Gene Expression Across Cell Types");
+
+            // 添加顏色比例尺
+            const legendWidth = 300, legendHeight = 10;
+
+            const legendSvg = heatmapSvgElement.append("g")
+                .attr("transform", `translate(${(heatmapWidth - legendWidth) / 2}, ${heatmapHeight - 20})`);
+
+            const legendGradient = legendSvg.append("defs")
+                .append("linearGradient")
+                .attr("id", "legend-gradient")
+                .attr("x1", "0%")
+                .attr("y1", "0%")
+                .attr("x2", "100%")
+                .attr("y2", "0%");
+
+            legendGradient.selectAll("stop")
+                .data([
+                    {offset: "0%", color: d3.interpolateBlues(0)},
+                    {offset: "100%", color: d3.interpolateBlues(1)}
+                ])
+                .enter().append("stop")
+                .attr("offset", d => d.offset)
+                .attr("stop-color", d => d.color);
+
+            legendSvg.append("rect")
+                .attr("width", legendWidth)
+                .attr("height", legendHeight)
+                .style("fill", "url(#legend-gradient)");
+
+            // 添加比例尺標籤
+            const legendScale = d3.scaleLinear()
+                .domain(colorHeat.domain())
+                .range([0, legendWidth]);
+
+            const legendAxis = d3.axisBottom(legendScale)
+                .ticks(5)
+                .tickSize(-legendHeight);
+
+            legendSvg.append("g")
+                .attr("transform", `translate(0, ${legendHeight})`)
+                .call(legendAxis)
+                .select(".domain").remove();
+
+            legendSvg.append("text")
+                .attr("x", legendWidth / 2)
+                .attr("y", -10)
+                .attr("text-anchor", "middle")
+                .style("font-size", "12px")
+                .text("Gene Expression Level");
         }).catch(error => {
             console.error('Error loading data:', error);
         });
