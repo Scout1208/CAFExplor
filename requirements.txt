@@ -1,0 +1,7 @@
+scanpy
+matplotlib
+pandas
+scipy
+igraph
+louvain
+leidenalg
