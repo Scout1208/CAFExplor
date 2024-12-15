@@ -5,7 +5,7 @@ import pandas as pd
 # 加載數據
 adata = sc.read_10x_mtx(
     'filtered_gene_bc_matrices/hg19',  # 使用解壓的目錄
-    var_names='gene_symbols',         # 用基因名稱而非基因編碼
+    var_names='gene_symbols',           # 用基因名稱而非基因編碼
     cache=True
 )
 print(adata)
@@ -42,8 +42,8 @@ print(adata)
 print(adata.var)
 
 # 選取前 100 個高變量基因
-top_genes = adata.var.highly_variable.sort_values(ascending=False).head(50).index.tolist()
-print(f"選取的前50個高變量基因: {top_genes}")
+top_genes = adata.var.highly_variable.sort_values(ascending=False).head(100).index.tolist()
+print(f"選取的前100個高變量基因: {top_genes}")
 
 # 進行 PCA 與 UMAP
 sc.pp.pca(adata, n_comps=50)
@@ -68,32 +68,28 @@ cell_type = {
 # 手動註釋對應的 leiden 聚類
 adata.obs["Manual Annotation"] = adata.obs.leiden.map(cell_type)
 
-# 導出 UMAP 座標與聚類標籤
+# 導出 UMAP 座標、聚類標籤和 cell_id
 umap_df = pd.DataFrame(adata.obsm['X_umap'], columns=['UMAP1', 'UMAP2'])
 umap_df['leiden'] = adata.obs['leiden'].values
+umap_df['cell_id'] = adata.obs_names.values  # 添加 cell_id
 umap_df.to_json('umap_data.json', orient='records')
+print("UMAP 數據已成功導出。")
 
-# 導出基因表達數據（熱圖數據）
-# 計算每個leiden聚類的基因表達平均值
-heatmap_df = adata[:, top_genes].to_df().copy()
-heatmap_df['leiden'] = adata.obs['leiden'].values
-
-# 計算每個聚類的基因平均表達
-heatmap_cluster_df = heatmap_df.groupby('leiden').mean().reset_index()
-
-# 將聚類標籤轉換為細胞類型名稱
-heatmap_cluster_df['cell_type'] = heatmap_cluster_df['leiden'].map(cell_type)
-
-# 將 'leiden' 列移除或保留根據需求
-heatmap_cluster_df = heatmap_cluster_df.drop(columns=['leiden'])
+# 導出基因表達數據（Heatmap 數據）
+# 提取前100個高變量基因的數據
+heatmap_data = adata[:, top_genes].to_df().copy()
+heatmap_data['cell_type'] = adata.obs['Manual Annotation'].values
 
 # 將 DataFrame 轉換為適合 D3.js 的格式
-# 我們將轉換為一個包含基因、細胞類型及表達值的陣列
-heatmap_data = []
+# 基因 × 細胞類型的平均表達
+heatmap_cluster_df = heatmap_data.groupby('cell_type').mean().reset_index()
+
+# 將 DataFrame 轉換為適合 D3.js 的格式
+heatmap_data_json = []
 for _, row in heatmap_cluster_df.iterrows():
     cell_type_name = row['cell_type']
     for gene in top_genes:
-        heatmap_data.append({
+        heatmap_data_json.append({
             'gene': gene,
             'cell_type': cell_type_name,
             'expression': row[gene]
@@ -101,6 +97,34 @@ for _, row in heatmap_cluster_df.iterrows():
 
 # 導出為 JSON 文件
 with open('heatmap_data.json', 'w') as f:
-    json.dump(heatmap_data, f, indent=4)
+    json.dump(heatmap_data_json, f, indent=4)
+print("Heatmap 數據已成功導出。")
 
-print("UMAP 和 Heatmap 數據已成功導出。")
+# 導出每個細胞的基因表達數據（僅前100基因）
+cell_expression_df = adata[:, top_genes].to_df().copy()
+cell_expression_df['cell_id'] = adata.obs_names.values
+cell_expression_df['cell_type'] = adata.obs['Manual Annotation'].values
+
+# 將 DataFrame 轉換為適合 D3.js 的格式
+cell_expression_json = []
+for _, row in cell_expression_df.iterrows():
+    cell_id = row['cell_id']
+    cell_type = row['cell_type']
+    genes_expressed = []
+    for gene in top_genes:
+        expression = row[gene]
+        if expression > 0:  # 根據需要調整閾值
+            genes_expressed.append({
+                'gene': gene,
+                'expression': expression
+            })
+    cell_expression_json.append({
+        'cell_id': cell_id,
+        'cell_type': cell_type,
+        'genes_expressed': genes_expressed
+    })
+
+# 導出為 JSON 文件
+with open('cell_expression.json', 'w') as f:
+    json.dump(cell_expression_json, f, indent=4)
+print("每個細胞的基因表達數據已成功導出。")
